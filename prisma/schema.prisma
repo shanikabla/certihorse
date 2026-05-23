@@ -1,0 +1,608 @@
+// Certihorse — Prisma schema
+//
+// Design principles encoded here:
+//
+// 1. Author vs Owner (CRITICAL). A vet is the AUTHOR of a dossier (guarantor
+//    of authenticity) but never the OWNER (the person who commissioned and
+//    paid for the visit owns the document, controls access). These are two
+//    distinct foreign keys on VetDossier.
+//
+// 2. ShareConsent is a first-class entity. No third party reads a dossier
+//    without an active consent record granted by the owner.
+//
+// 3. Append-only vet dossiers. Vendors never get write access. Corrections
+//    create a new dossier version linked to the previous via
+//    previousVersionId; the chain is preserved.
+//
+// 4. Listings are never hard-deleted. ListingStatus.RETIRED preserves the
+//    historical link to the Horse so the market's amnesia is broken.
+//
+// 5. Tier-capable Certification. The schema supports BRONZE/SILVER/GOLD
+//    tiers even though MVP UI may collapse them to a binary "certified"
+//    badge.
+//
+// 6. Data source status (CERTIFIE vs DECLARE) lives at the container level
+//    where possible: Horse.identityStatus, the dossier's own existence
+//    implies CERTIFIE for everything it contains, etc. We resist sprinkling
+//    a status enum on every scalar field.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Auth.js v5 — required adapter tables
+// ───────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  passwordHash  String? // null when user is OAuth-only
+  role          Role      @default(BUYER)
+  locale        String    @default("fr-FR")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+
+  // Role extensions (1-to-1, present only when role matches)
+  vetProfile VetProfile?
+
+  // Things the user creates / participates in
+  horsesOwned           Horse[]          @relation("HorseOwner")
+  listings              Listing[]
+  visitsAsVet           Visit[]          @relation("VisitVet")
+  visitsCommissioned    Visit[]          @relation("VisitCommissioner")
+  dossiersAuthored      VetDossier[]     @relation("DossierAuthor")
+  dossiersOwned         VetDossier[]     @relation("DossierOwner")
+  consentsGranted       ShareConsent[]   @relation("ConsentGrantor")
+  consentsReceived      ShareConsent[]   @relation("ConsentGrantee")
+  accessLogs            ShareAccessLog[]
+  conversationsAsBuyer  Conversation[]   @relation("ConversationBuyer")
+  conversationsAsSeller Conversation[]   @relation("ConversationSeller")
+  messagesSent          Message[]
+  subscriptions         Subscription[]
+  identityVerifications Horse[]          @relation("HorseIdentityVerifier")
+
+  @@index([role])
+}
+
+enum Role {
+  SELLER
+  BUYER
+  VET
+  ADMIN
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Vet professional profile + verification
+// ───────────────────────────────────────────────────────────────────────────
+
+model VetProfile {
+  id                 String                @id @default(cuid())
+  userId             String                @unique
+  ordreNumber        String                @unique // Numéro d'ordre vétérinaire
+  verificationStatus VetVerificationStatus @default(PENDING)
+  verifiedAt         DateTime?
+  verifiedById       String? // ADMIN user who validated the ordre number
+  specialties        String[] // e.g. ["EQUINE_LOCOMOTION", "IMAGING"]
+  regionCode         String? // e.g. INSEE region code, used for buyer-side proximity sort
+  city               String?
+  bio                String?               @db.Text
+  // Indépendance — the vet must be able to mark themselves independent of
+  // any seller/marchand to qualify for the premium "indep vet" tier on a dossier
+  independent        Boolean               @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([verificationStatus])
+  @@index([regionCode])
+}
+
+enum VetVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  REVOKED
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Pilier 1 — Horse identity
+// ───────────────────────────────────────────────────────────────────────────
+
+model Horse {
+  id        String   @id @default(cuid())
+  ownerId   String // The seller who created and owns this horse profile
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Identity — Pilier 1. These are the keys to the horse and the foundation
+  // of certification. identityStatus is the single source of truth for
+  // whether the puce/SIRE pair has been verified.
+  chipNumber String? @unique // Transpondeur (15 digits ISO 11784/85)
+  sireNumber String? @unique // Numéro SIRE
+
+  identityStatus         HorseIdentityStatus @default(UNVERIFIED)
+  identityVerifiedAt     DateTime?
+  identityVerifiedById   String? // The User who verified — typically a VET (puce scan) or ADMIN
+  identityVerifiedMethod String? // "VET_PUCE_SCAN" | "ADMIN_REVIEW" | "SIRE_API" (phase 2)
+
+  // Descriptive (DECLARE at MVP; some fields may become CERTIFIE via SIRE API in phase 2)
+  name      String
+  breed     String? // race
+  color     String? // robe
+  sex       HorseSex?
+  birthDate DateTime?
+  heightCm  Int? // taille au garrot
+
+  owner         User           @relation("HorseOwner", fields: [ownerId], references: [id])
+  verifier      User?          @relation("HorseIdentityVerifier", fields: [identityVerifiedById], references: [id])
+  listings      Listing[]
+  visits        Visit[]
+  dossiers      VetDossier[]
+  results       SportResult[]
+  certification Certification?
+
+  @@index([ownerId])
+  @@index([identityStatus])
+}
+
+enum HorseIdentityStatus {
+  UNVERIFIED
+  VERIFIED_BY_VET
+  VERIFIED_BY_ADMIN
+  VERIFIED_BY_API
+}
+
+enum HorseSex {
+  MALE
+  FEMALE
+  GELDING // hongre
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Listings — never hard-deleted (RETIRED status preserves the Horse history)
+// ───────────────────────────────────────────────────────────────────────────
+
+model Listing {
+  id          String        @id @default(cuid())
+  horseId     String
+  sellerId    String
+  title       String
+  description String        @db.Text
+  discipline  Discipline?
+  level       String? // declarative level/category, e.g. "Amateur 2", "Pro 1"
+  priceCents  Int? // null = "on demand"
+  currency    String        @default("EUR")
+  status      ListingStatus @default(DRAFT)
+  publishedAt DateTime?
+  retiredAt   DateTime?
+  soldAt      DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  horse         Horse          @relation(fields: [horseId], references: [id])
+  seller        User           @relation(fields: [sellerId], references: [id])
+  conversations Conversation[]
+
+  @@index([horseId])
+  @@index([sellerId])
+  @@index([status])
+}
+
+enum ListingStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+  SOLD
+}
+
+enum Discipline {
+  DRESSAGE
+  SHOW_JUMPING // CSO
+  EVENTING // CCE
+  ENDURANCE
+  WESTERN
+  RACING
+  LEISURE
+  OTHER
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Pilier 2 — Vet visits + dossiers (append-only, author≠owner)
+// ───────────────────────────────────────────────────────────────────────────
+
+model Visit {
+  id             String      @id @default(cuid())
+  horseId        String
+  vetId          String
+  // commissioner = the person who initiated and pays for the visit.
+  // This determines the OWNER of any resulting dossier (and therefore who
+  // controls subsequent access via ShareConsent). Usually the seller at MVP;
+  // in phase 2 a buyer can commission a visit and become the owner.
+  commissionerId String
+  type           VisitType
+  scheduledFor   DateTime?
+  completedAt    DateTime?
+  status         VisitStatus @default(REQUESTED)
+  // Whether the vet was independent of the seller at visit time (premium tier)
+  vetIndependent Boolean     @default(false)
+  notes          String?     @db.Text
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  horse        Horse        @relation(fields: [horseId], references: [id])
+  vet          User         @relation("VisitVet", fields: [vetId], references: [id])
+  commissioner User         @relation("VisitCommissioner", fields: [commissionerId], references: [id])
+  dossiers     VetDossier[]
+
+  @@index([horseId])
+  @@index([vetId])
+  @@index([commissionerId])
+  @@index([status])
+}
+
+enum VisitType {
+  PURCHASE_EXAM // visite d'achat
+  ROUTINE
+  FOLLOW_UP
+  IMAGING_ONLY
+}
+
+enum VisitStatus {
+  REQUESTED
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+// VetDossier — the structured report. Immutable on the seller side; the vet
+// can publish corrections by creating a new dossier that references the
+// previous one via previousVersionId. The original is preserved.
+model VetDossier {
+  id      String @id @default(cuid())
+  visitId String
+  horseId String
+
+  // Author = the VET (guarantor of authenticity, cannot dispose of the doc)
+  authorId String
+  // Owner = the User who commissioned and paid for the visit. ONLY this
+  // person can read the dossier by default and can grant access via
+  // ShareConsent. A vendor who didn't commission the visit is NOT the owner.
+  ownerId  String
+
+  // Versioning — append-only model. If this dossier supersedes another, set
+  // previousVersionId. The "current" dossier for a Visit is the leaf of the
+  // chain (no record where previousVersionId == this.id).
+  previousVersionId String?   @unique
+  supersededAt      DateTime? // set when a newer version supersedes this one
+
+  // Structured clinical fields. Keep enums tight to make queries useful.
+  examGeneral   String?     @db.Text // examen clinique général
+  examLocomotor String?     @db.Text // examen locomoteur
+  conclusion    String?     @db.Text
+  // Vet's overall opinion is intentionally a structured enum, NOT a score.
+  // The platform does NOT display a numeric risk score on a horse — it would
+  // be juridically dangerous (dénigrement) and contrary to the founding
+  // principle "certify facts, never judge quality".
+  opinion       VetOpinion?
+
+  finalizedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  visit           Visit          @relation(fields: [visitId], references: [id])
+  horse           Horse          @relation(fields: [horseId], references: [id])
+  author          User           @relation("DossierAuthor", fields: [authorId], references: [id])
+  owner           User           @relation("DossierOwner", fields: [ownerId], references: [id])
+  previousVersion VetDossier?    @relation("DossierVersionChain", fields: [previousVersionId], references: [id])
+  nextVersion     VetDossier?    @relation("DossierVersionChain")
+  files           MedicalFile[]
+  consents        ShareConsent[]
+
+  @@index([visitId])
+  @@index([horseId])
+  @@index([ownerId])
+  @@index([authorId])
+}
+
+// Intentionally coarse — no numeric scoring. Used for filtering and search,
+// never for risk display on a public horse page.
+enum VetOpinion {
+  FAVORABLE
+  FAVORABLE_WITH_RESERVES
+  UNFAVORABLE
+  INCONCLUSIVE
+}
+
+model MedicalFile {
+  id         String          @id @default(cuid())
+  dossierId  String
+  kind       MedicalFileKind
+  // Anatomical zone for radiographs, e.g. "FRONT_LEFT_FETLOCK", "BACK".
+  // Free-form at MVP, may be enumified later.
+  zone       String?
+  // R2 object key (bucket configured via env). Never serve directly — always
+  // through a signed URL gated by ShareConsent or ownership check.
+  r2Key      String          @unique
+  sizeBytes  Int
+  mimeType   String
+  uploadedAt DateTime        @default(now())
+
+  dossier VetDossier @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  @@index([dossierId])
+}
+
+enum MedicalFileKind {
+  RADIOGRAPH
+  PDF_REPORT
+  PHOTO
+  LAB_RESULT
+  OTHER
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// ShareConsent — first-class consent record. No third-party access without it.
+// ───────────────────────────────────────────────────────────────────────────
+
+model ShareConsent {
+  id          String             @id @default(cuid())
+  dossierId   String
+  grantorId   String // The OWNER of the dossier (must match VetDossier.ownerId)
+  granteeId   String // The user receiving the access
+  scope       ShareScope         @default(FULL)
+  // Optional subset of fields when scope=PARTIAL. Free-form at MVP — may
+  // become structured (whitelisted field names) later.
+  partialNote String?            @db.Text
+  status      ShareConsentStatus @default(ACTIVE)
+  grantedAt   DateTime           @default(now())
+  expiresAt   DateTime? // null = no expiration
+  revokedAt   DateTime?
+
+  dossier    VetDossier       @relation(fields: [dossierId], references: [id])
+  grantor    User             @relation("ConsentGrantor", fields: [grantorId], references: [id])
+  grantee    User             @relation("ConsentGrantee", fields: [granteeId], references: [id])
+  accessLogs ShareAccessLog[]
+
+  @@index([dossierId])
+  @@index([grantorId])
+  @@index([granteeId])
+  @@index([status])
+}
+
+enum ShareScope {
+  FULL
+  PARTIAL
+}
+
+enum ShareConsentStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+// Audit trail for every consumption of a shared dossier. Legal accountability
+// brick — populated by the API layer whenever a grantee reads a dossier or
+// downloads a file under a consent grant.
+model ShareAccessLog {
+  id         String            @id @default(cuid())
+  consentId  String
+  granteeId  String
+  action     ShareAccessAction
+  fileId     String? // when action is FILE_DOWNLOAD
+  ipAddress  String?
+  userAgent  String?
+  occurredAt DateTime          @default(now())
+
+  consent ShareConsent @relation(fields: [consentId], references: [id], onDelete: Cascade)
+  grantee User         @relation(fields: [granteeId], references: [id])
+
+  @@index([consentId])
+  @@index([granteeId])
+}
+
+enum ShareAccessAction {
+  DOSSIER_VIEW
+  FILE_DOWNLOAD
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Pilier 3 — Sport results (imported from official sources)
+// ───────────────────────────────────────────────────────────────────────────
+
+model SportResult {
+  id          String            @id @default(cuid())
+  horseId     String
+  source      SportResultSource
+  externalRef String? // ID in the source system if available
+  competition String
+  discipline  Discipline?
+  category    String? // e.g. "Amateur 2 GP"
+  rank        Int?
+  score       String? // free-form to accommodate different scoring systems
+  date        DateTime
+  importedAt  DateTime          @default(now())
+
+  horse Horse @relation(fields: [horseId], references: [id])
+
+  @@index([horseId])
+  @@index([source])
+}
+
+enum SportResultSource {
+  FFE // Fédération Française d'Équitation
+  SHF // Société Hippique Française
+  MANUAL_VERIFIED // entered by admin with verification
+  OTHER
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Certification — computed status, tier-capable even if UI is binary at MVP
+// ───────────────────────────────────────────────────────────────────────────
+
+model Certification {
+  id             String            @id @default(cuid())
+  horseId        String            @unique
+  tier           CertificationTier @default(NONE)
+  // Snapshot of which pillars are filled at the time the cert was last
+  // recomputed. Source of truth lives in the underlying entities; this is a
+  // denormalized projection for fast listing queries.
+  pillarIdentity Boolean           @default(false)
+  pillarVet      Boolean           @default(false)
+  pillarSport    Boolean           @default(false)
+  pillarConsent  Boolean           @default(false) // Pilier 4, behind feature flag
+  recomputedAt   DateTime          @default(now())
+
+  horse Horse @relation(fields: [horseId], references: [id])
+
+  @@index([tier])
+}
+
+enum CertificationTier {
+  NONE
+  BRONZE
+  SILVER
+  GOLD
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Stripe Billing — vet pro subscription is the primary revenue line
+// ───────────────────────────────────────────────────────────────────────────
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  userId               String
+  type                 SubscriptionType
+  stripeCustomerId     String
+  stripeSubscriptionId String             @unique
+  stripePriceId        String
+  status               SubscriptionStatus
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([stripeCustomerId])
+}
+
+enum SubscriptionType {
+  VET_PRO
+  SELLER_PRO
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Messaging — single channel for buyer↔seller, also carries structured
+// share-of-dossier requests so consent flows live in the chat.
+// ───────────────────────────────────────────────────────────────────────────
+
+model Conversation {
+  id            String    @id @default(cuid())
+  listingId     String?
+  buyerId       String
+  sellerId      String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastMessageAt DateTime?
+
+  listing  Listing?  @relation(fields: [listingId], references: [id])
+  buyer    User      @relation("ConversationBuyer", fields: [buyerId], references: [id])
+  seller   User      @relation("ConversationSeller", fields: [sellerId], references: [id])
+  messages Message[]
+
+  @@unique([buyerId, sellerId, listingId])
+  @@index([buyerId])
+  @@index([sellerId])
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String
+  senderId       String
+  type           MessageType @default(TEXT)
+  body           String?     @db.Text
+  // For SHARE_REQUEST: the dossier the requester wants access to.
+  // For SHARE_GRANTED / SHARE_DENIED: the consent record (when granted) or
+  // null (when denied).
+  dossierId      String?
+  consentId      String?
+  readAt         DateTime?
+  createdAt      DateTime    @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id])
+
+  @@index([conversationId])
+  @@index([senderId])
+}
+
+enum MessageType {
+  TEXT
+  SHARE_REQUEST
+  SHARE_GRANTED
+  SHARE_DENIED
+  SHARE_REVOKED
+  SYSTEM
+}
