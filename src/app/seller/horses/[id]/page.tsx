@@ -15,6 +15,7 @@ import {
   formatDate,
   formatPriceCents,
 } from "@/lib/format"
+import { VISIT_STATUS_LABEL_SELLER, VISIT_TYPE_LABEL } from "@/lib/vet"
 
 import {
   markListingSoldAction,
@@ -35,6 +36,12 @@ export default async function HorseDetailPage({
     include: {
       listings: { orderBy: { createdAt: "desc" } },
       dossiers: { select: { id: true } },
+      visits: {
+        include: {
+          vet: { select: { name: true, email: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      },
     },
   })
 
@@ -104,6 +111,62 @@ export default async function HorseDetailPage({
           />
         </CardContent>
       </Card>
+
+      <section>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">
+              Visites vétérinaires
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Le vétérinaire dépose un dossier rattaché à ce cheval, dont tu es
+              propriétaire en tant que demandeur de la visite.
+            </p>
+          </div>
+          <Link
+            href={`/seller/horses/${horse.id}/visits/new`}
+            className={buttonVariants({ variant: "outline" })}
+          >
+            Inviter un vétérinaire
+          </Link>
+        </div>
+
+        <ul className="mt-4 space-y-3">
+          {horse.visits.length === 0 ? (
+            <li className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+              Aucune visite vétérinaire enregistrée.
+            </li>
+          ) : (
+            horse.visits.map((visit) => (
+              <li key={visit.id} className="rounded-lg border p-4 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium">
+                      {VISIT_TYPE_LABEL[visit.type]}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {visit.vet.name ?? visit.vet.email}
+                      {visit.scheduledFor && ` · prévue le ${formatDate(visit.scheduledFor)}`}
+                      {visit.completedAt && ` · effectuée le ${formatDate(visit.completedAt)}`}
+                    </div>
+                  </div>
+                  <span
+                    className={
+                      visit.status === "SCHEDULED" || visit.status === "COMPLETED"
+                        ? "text-[10px] uppercase tracking-wide font-medium text-emerald-700 dark:text-emerald-400"
+                        : visit.status === "REQUESTED"
+                          ? "text-[10px] uppercase tracking-wide font-medium text-amber-700 dark:text-amber-400"
+                          : "text-[10px] uppercase tracking-wide font-medium text-muted-foreground"
+                    }
+                  >
+                    {VISIT_STATUS_LABEL_SELLER[visit.status]}
+                  </span>
+                </div>
+              </li>
+            ))
+          )}
+        </ul>
+      </section>
 
       <section>
         <div className="flex items-end justify-between gap-4">
