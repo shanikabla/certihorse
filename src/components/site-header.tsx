@@ -1,0 +1,54 @@
+import Link from "next/link"
+
+import { auth, signOut } from "@/auth"
+import { Button, buttonVariants } from "@/components/ui/button"
+
+export async function SiteHeader() {
+  const session = await auth()
+  const user = session?.user
+
+  return (
+    <header className="border-b">
+      <div className="mx-auto max-w-6xl px-6 h-14 flex items-center justify-between">
+        <Link href="/" className="font-semibold tracking-tight">
+          Certihorse
+        </Link>
+
+        <nav className="flex items-center gap-2">
+          {user ? (
+            <>
+              <Link
+                href="/account"
+                className="text-sm text-muted-foreground hover:text-foreground px-2"
+              >
+                {user.email}
+              </Link>
+              <form
+                action={async () => {
+                  "use server"
+                  await signOut({ redirectTo: "/" })
+                }}
+              >
+                <Button type="submit" variant="ghost" size="sm">
+                  Se déconnecter
+                </Button>
+              </form>
+            </>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className={buttonVariants({ variant: "ghost", size: "sm" })}
+              >
+                Connexion
+              </Link>
+              <Link href="/signup" className={buttonVariants({ size: "sm" })}>
+                Créer un compte
+              </Link>
+            </>
+          )}
+        </nav>
+      </div>
+    </header>
+  )
+}
