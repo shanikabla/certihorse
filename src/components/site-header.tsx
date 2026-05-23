@@ -4,11 +4,12 @@ import { auth, signOut } from "@/auth"
 import { Button, buttonVariants } from "@/components/ui/button"
 
 // Per-role primary destination shown in the header so a signed-in user can
-// always get back to their workspace in one click.
+// always get back to their workspace in one click. ADMIN is intentionally
+// absent — the backoffice is direct-URL only for the trusted internal team
+// (no public link).
 const ROLE_HOME: Record<string, { href: string; label: string }> = {
   SELLER: { href: "/seller", label: "Mes chevaux" },
   VET: { href: "/vet", label: "Mes dossiers" },
-  ADMIN: { href: "/admin", label: "Administration" },
 }
 
 export async function SiteHeader() {

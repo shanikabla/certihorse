@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server"
 import type { NextAuthConfig } from "next-auth"
 
 // Edge-compatible Auth.js config — used by middleware and by the main
@@ -33,15 +34,24 @@ export const authConfig = {
       return session
     },
     authorized({ auth, request }) {
-      const { pathname } = request.nextUrl
+      const { pathname, origin } = request.nextUrl
       const role = auth?.user?.role
+      const isLoggedIn = !!auth
 
-      // Role-gated path prefixes. Public paths fall through to `true`.
-      if (pathname.startsWith("/admin")) return role === "ADMIN"
-      if (pathname.startsWith("/vet")) return role === "VET" || role === "ADMIN"
-      if (pathname.startsWith("/seller"))
-        return role === "SELLER" || role === "ADMIN"
-      if (pathname.startsWith("/account")) return !!auth
+      // Role-gated path prefixes. For each, two layers:
+      //   - not logged in → return false → Auth.js redirects to /login
+      //   - logged in but wrong role → explicit redirect to /forbidden (so
+      //     the user doesn't get told to log in when they already are)
+      const checkRole = (allowed: ReadonlyArray<string>) => {
+        if (!isLoggedIn) return false
+        if (allowed.includes(role ?? "")) return true
+        return NextResponse.redirect(new URL("/forbidden", origin))
+      }
+
+      if (pathname.startsWith("/admin")) return checkRole(["ADMIN"])
+      if (pathname.startsWith("/vet")) return checkRole(["VET", "ADMIN"])
+      if (pathname.startsWith("/seller")) return checkRole(["SELLER", "ADMIN"])
+      if (pathname.startsWith("/account")) return isLoggedIn
 
       return true
     },
