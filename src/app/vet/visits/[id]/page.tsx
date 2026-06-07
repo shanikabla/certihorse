@@ -2,7 +2,7 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { requireRole } from "@/lib/auth/rbac"
@@ -38,6 +38,7 @@ export default async function VetVisitDetailPage({
       },
       commissioner: { select: { name: true, email: true } },
       vet: { select: { name: true, email: true } },
+      dossiers: { select: { id: true, finalizedAt: true }, orderBy: { finalizedAt: "desc" } },
     },
   })
 
@@ -148,9 +149,34 @@ export default async function VetVisitDetailPage({
               radiographies. Le dossier sera horodaté et immuable — toute
               correction se fera par un amendement daté.
             </p>
-            <Button disabled title="Disponible au prochain déploiement">
-              Déposer le dossier (à venir)
-            </Button>
+            <Link
+              href={`/vet/visits/${visit.id}/dossier/new`}
+              className={buttonVariants()}
+            >
+              Déposer le dossier
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
+      {visit.status === "COMPLETED" && visit.dossiers.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Dossier déposé</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            {visit.dossiers.map((d) => (
+              <Link
+                key={d.id}
+                href={`/dossiers/${d.id}`}
+                className="block rounded-lg border p-3 hover:bg-muted/50 transition"
+              >
+                <div className="font-medium">Compte-rendu</div>
+                <div className="text-xs text-muted-foreground">
+                  Déposé le {formatDate(d.finalizedAt)} — voir le contenu
+                </div>
+              </Link>
+            ))}
           </CardContent>
         </Card>
       )}

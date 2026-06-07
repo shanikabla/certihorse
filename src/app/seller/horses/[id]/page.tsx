@@ -35,10 +35,15 @@ export default async function HorseDetailPage({
     where: { id },
     include: {
       listings: { orderBy: { createdAt: "desc" } },
-      dossiers: { select: { id: true } },
+      dossiers: {
+        where: { ownerId: user.id },
+        include: { author: { select: { name: true, email: true } } },
+        orderBy: { finalizedAt: "desc" },
+      },
       visits: {
         include: {
           vet: { select: { name: true, email: true } },
+          dossiers: { select: { id: true } },
         },
         orderBy: { createdAt: "desc" },
       },
@@ -112,6 +117,41 @@ export default async function HorseDetailPage({
         </CardContent>
       </Card>
 
+      {horse.dossiers.length > 0 && (
+        <section>
+          <h2 className="text-lg font-semibold tracking-tight">
+            Dossiers vétérinaires
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Tu es propriétaire de ces dossiers. Tu décides librement à qui les
+            partager — un acheteur intéressé doit te le demander dans le chat.
+          </p>
+          <ul className="mt-4 space-y-3">
+            {horse.dossiers.map((dossier) => (
+              <li key={dossier.id}>
+                <Link
+                  href={`/dossiers/${dossier.id}`}
+                  className="block rounded-lg border p-4 hover:bg-muted/50 transition"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm">
+                        Dossier déposé par{" "}
+                        {dossier.author.name ?? dossier.author.email}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Le {formatDate(dossier.finalizedAt)} · document immuable
+                      </div>
+                    </div>
+                    <DataStatusBadge status="CERTIFIE" />
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section>
         <div className="flex items-end justify-between gap-4">
           <div>
@@ -149,6 +189,14 @@ export default async function HorseDetailPage({
                       {visit.scheduledFor && ` · prévue le ${formatDate(visit.scheduledFor)}`}
                       {visit.completedAt && ` · effectuée le ${formatDate(visit.completedAt)}`}
                     </div>
+                    {visit.dossiers.length > 0 && (
+                      <Link
+                        href={`/dossiers/${visit.dossiers[0]!.id}`}
+                        className="mt-2 inline-flex text-xs underline-offset-2 hover:underline"
+                      >
+                        Voir le dossier
+                      </Link>
+                    )}
                   </div>
                   <span
                     className={
