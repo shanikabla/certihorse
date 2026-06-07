@@ -58,9 +58,3 @@ pnpm dev
 ## What is **allowed**
 
 - ✅ Positive factual badge "Vet record available on request" on a horse profile that has a record on file. The absence of the badge becomes a signal without accusing anyone.
-
-## Phases
-
-- **Phase 1 (MVP, in progress)** — auth + RBAC, full data model, seller creates horse + listing, vet on invitation deposits an immutable record, CERTIFIED/DECLARED display + badge, share requests via chat, Stripe vet subscription.
-- **Phase 2** — visit booking through the platform, integrations with official registries (microchip/SIRE, competition results), Pillar 4 (consent-based traceability) behind a feature flag after legal review.
-- **Phase 3** — payment escrow, broker commissions (insurance, transport), visible certification tiers if retained.
