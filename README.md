@@ -1,66 +1,66 @@
 # Certihorse
 
-Plateforme web de **certification de vente de chevaux**. Pas un site d'annonces : un label de confiance que le vendeur affiche pour prouver qu'il n'a rien à cacher. Le parallèle mental est le contrôle technique automobile ou le diagnostic immobilier.
+A web platform for **horse-sale certification**. Not another classifieds site: a trust label that the seller displays to prove they have nothing to hide. The mental parallel is the vehicle safety inspection or the home inspection survey.
 
-## Principe fondateur
+## Founding principle
 
-Chaque donnée affichée porte un statut **CERTIFIÉ** (produite par un tiers vérifiable — un vétérinaire, une base officielle) ou **DÉCLARÉ** (affirmée par le vendeur). Ces deux statuts ne sont **jamais** visuellement confondus.
+Every piece of data displayed carries a status — **CERTIFIED** (produced by a verifiable third party: a veterinarian, an official registry) or **DECLARED** (asserted by the seller). The two statuses are **never** visually conflated.
 
-La plateforme certifie des **faits vérifiés à une date donnée** (« ces radios sont celles de ce cheval, prises ce jour, par ce vétérinaire »), **jamais** une promesse de qualité ou de l'avenir.
+The platform certifies **facts verified at a given date** ("these are this horse's X-rays, taken on this day, by this vet"), and **never** a promise about quality or the future.
 
-## Trois rôles
+## Three roles
 
-- **Vendeur** — crée un profil cheval et une annonce, renseigne les données déclaratives, paie la certification.
-- **Acheteur** — consulte les chevaux certifiés, demande l'accès aux dossiers vétérinaires via le chat, contacte le vendeur.
-- **Vétérinaire** — compte pro vérifié (numéro d'ordre), dépose des comptes-rendus et radios horodatés et immuables.
+- **Seller** — creates a horse profile and a listing, fills in declarative data, pays for certification.
+- **Buyer** — browses certified horses, requests access to vet records via chat, contacts the seller.
+- **Vet** — verified professional account (registration number), deposits timestamped and immutable reports and X-rays.
 
-## Principe de propriété des documents vétérinaires (structurant)
+## Vet-record ownership principle (load-bearing)
 
-En droit français, un dossier vétérinaire appartient à celui qui a commandé et payé la visite. Le vétérinaire en est l'auteur (garant d'authenticité), mais ne peut pas en disposer librement.
+Under French law, a vet record (clinical report, X-rays) belongs to the person who commissioned and paid for the visit. The vet is its author (guarantor of authenticity) but cannot freely dispose of it.
 
-- `author` (le véto) ≠ `owner` (le commanditaire qui contrôle l'accès) — séparation systématique dans le modèle de données.
-- Visibilité par défaut : **owner seul**. Un tiers ne consulte qu'avec un `ShareConsent` actif.
-- Un second acheteur ne peut PAS accéder au dossier d'un premier — il demande via chat, l'owner consent ou refuse.
+- `author` (the vet) ≠ `owner` (the commissioner who controls access) — modeled as two distinct foreign keys throughout the schema.
+- Default visibility: **owner only**. A third party can read it only via an active `ShareConsent`.
+- A second prospective buyer cannot access the record commissioned by a first — they must ask via chat, and the owner freely grants or refuses.
 
 ## Stack
 
 - **Next.js 16** (App Router) + TypeScript + Tailwind v4 + shadcn/ui (base-nova preset)
 - **PostgreSQL** + **Prisma**
-- **Auth.js v5** (3-role RBAC : `SELLER`, `BUYER`, `VET`)
-- **Stripe Billing** (abonnement véto pro, principal revenu)
-- **Cloudflare R2** (stockage radios/PDF avec URLs signées à durée limitée)
-- **Resend** (emails transactionnels)
-- Déploiement : **Vercel** + **Neon** postgres
+- **Auth.js v5** (3-role RBAC: `SELLER`, `BUYER`, `VET`)
+- **Stripe Billing** (vet-pro subscription is the primary revenue line)
+- **Cloudflare R2** (storage for X-rays and PDFs with short-lived signed URLs)
+- **Resend** (transactional emails)
+- Deployment: **Vercel** + **Neon** Postgres
 
-## Démarrer
+## Getting started
 
 ```bash
 nvm use            # Node 22
 pnpm install
 cp .env.example .env.local
-# Renseigner les variables — au minimum DATABASE_URL + AUTH_SECRET pour démarrer
+# Fill in the env vars — at minimum DATABASE_URL + AUTH_SECRET to start
 pnpm prisma migrate dev
 pnpm dev
 ```
 
-## Architecture des données — rappels critiques
+## Data architecture — critical reminders
 
-- Toute donnée « fait produit » porte un statut `CERTIFIE | DECLARE` et une référence à sa source.
-- `Listing` n'est **jamais** hard-deleted (statut `RETIRED`). Les données restent rattachées au `Horse` pour briser l'amnésie du marché.
-- `VetDossier` est **append-only** côté véto, **immuable** côté vendeur. Les amendements créent une nouvelle version horodatée.
-- `ShareConsent` est une **brique de première classe** : aucun dossier n'est consultable par un tiers sans consentement actif accordé par l'owner.
+- Every "product fact" carries a `CERTIFIE | DECLARE` status and a reference to its source.
+- `Listing` is **never** hard-deleted (`RETIRED` status). Data stays attached to the `Horse` so the market's amnesia is broken.
+- `VetDossier` is **append-only** on the vet side and **immutable** on the seller side. Amendments create a new timestamped version.
+- `ShareConsent` is a **first-class entity**: no record is consultable by a third party without an active consent granted by the owner.
 
-## Ce qui est **interdit** (à vie, jusqu'à validation juridique explicite)
+## What is **forbidden** (indefinitely, until explicit legal review)
 
-- ❌ Score de risque, note de santé, pastille de « qualité » sur un cheval. Dangereux juridiquement (dénigrement) et contraire au principe « certifier des faits, jamais juger la qualité ».
-- ❌ Divulguer le contenu d'un dossier vétérinaire sans le consentement de son owner, même partiellement, même reformulé.
+- ❌ Risk score, health rating, "quality" badge on a horse. Legally hazardous (disparagement of someone else's property) and contrary to the founding principle "certify facts, never judge quality."
+- ❌ Disclosing the content of a vet record without its owner's consent — even partially, even reworded.
 
-## Ce qui est **autorisé**
+## What is **allowed**
 
-- ✅ Badge factuel positif « Dossier vétérinaire disponible sur demande » sur une fiche cheval qui a un dossier déposé. L'absence du badge devient un signal sans accuser personne.
+- ✅ Positive factual badge "Vet record available on request" on a horse profile that has a record on file. The absence of the badge becomes a signal without accusing anyone.
 
 ## Phases
 
-- **Phase 1 (MVP, en cours)** — auth + RBAC, modèle complet, vendeur crée cheval + annonce, véto sur invitation dépose dossier immuable, affichage CERTIFIÉ/DÉCLARÉ + badge, demande de partage via chat, Stripe abonnement véto.
-- **Phase 2** — réservation visite via plateforme, intégrations API officielles (puce/SIRE, résultats sportifs), Pilier 4 (traçabilité par consentement) derrière feature flag après validation juridique.
-- **Phase 3** — séquestre paiement, commissions assurance/transport, paliers de certification visibles si retenus.
+- **Phase 1 (MVP, in progress)** — auth + RBAC, full data model, seller creates horse + listing, vet on invitation deposits an immutable record, CERTIFIED/DECLARED display + badge, share requests via chat, Stripe vet subscription.
+- **Phase 2** — visit booking through the platform, integrations with official registries (microchip/SIRE, competition results), Pillar 4 (consent-based traceability) behind a feature flag after legal review.
+- **Phase 3** — payment escrow, broker commissions (insurance, transport), visible certification tiers if retained.
