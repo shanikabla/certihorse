@@ -24,6 +24,12 @@ export async function SiteHeader() {
           <Link href="/" className="font-semibold tracking-tight">
             Certihorse
           </Link>
+          <Link
+            href="/horses"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Chevaux à vendre
+          </Link>
           {roleHome && (
             <Link
               href={roleHome.href}

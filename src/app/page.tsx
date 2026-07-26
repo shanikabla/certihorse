@@ -21,12 +21,18 @@ export default function Home() {
             cacher — l&apos;équivalent du contrôle technique pour le cheval.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/signup" className={buttonVariants({ size: "lg" })}>
-              Créer mon compte
+            <Link href="/horses" className={buttonVariants({ size: "lg" })}>
+              Voir les chevaux
+            </Link>
+            <Link
+              href="/signup"
+              className={buttonVariants({ size: "lg", variant: "outline" })}
+            >
+              Créer un compte
             </Link>
             <Link
               href="#comment"
-              className={buttonVariants({ size: "lg", variant: "outline" })}
+              className={buttonVariants({ size: "lg", variant: "ghost" })}
             >
               Comment ça marche
             </Link>
