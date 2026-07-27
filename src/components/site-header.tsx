@@ -44,6 +44,12 @@ export async function SiteHeader() {
           {user ? (
             <>
               <Link
+                href="/messages"
+                className="text-sm text-muted-foreground hover:text-foreground px-2"
+              >
+                Messages
+              </Link>
+              <Link
                 href="/account"
                 className="text-sm text-muted-foreground hover:text-foreground px-2"
               >

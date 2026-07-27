@@ -2,6 +2,8 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { ShieldCheck, FileText } from "lucide-react"
 
+import { contactSellerAction } from "./actions"
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { DataStatusBadge } from "@/components/data-status-badge"
 import { db } from "@/lib/db"
@@ -169,23 +171,27 @@ export default async function PublicHorseDetailPage({
                 {horse.owner.name ?? "Vendeur particulier"}
               </div>
             </div>
-            <button
-              type="button"
-              disabled
-              className="w-full h-9 rounded-md bg-foreground text-background text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Messagerie disponible au prochain déploiement"
-            >
-              Contacter le vendeur
-            </button>
-            {hasVetRecord && (
+            <form action={contactSellerAction}>
+              <input type="hidden" name="horseId" value={horse.id} />
+              <input type="hidden" name="withShareRequest" value="false" />
               <button
-                type="button"
-                disabled
-                className="w-full h-9 rounded-md border border-border text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                title="Messagerie disponible au prochain déploiement"
+                type="submit"
+                className="w-full h-9 rounded-md bg-foreground text-background text-sm font-medium hover:bg-foreground/90"
               >
-                Demander l&apos;accès au dossier
+                Contacter le vendeur
               </button>
+            </form>
+            {hasVetRecord && (
+              <form action={contactSellerAction}>
+                <input type="hidden" name="horseId" value={horse.id} />
+                <input type="hidden" name="withShareRequest" value="true" />
+                <button
+                  type="submit"
+                  className="w-full h-9 rounded-md border border-border text-sm hover:bg-muted"
+                >
+                  Demander l&apos;accès au dossier
+                </button>
+              </form>
             )}
             <p className="text-[10px] text-muted-foreground leading-relaxed">
               Toute demande passe par la messagerie interne. Le vendeur reste
